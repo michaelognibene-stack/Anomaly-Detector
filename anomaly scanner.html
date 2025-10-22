@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anomaly Scanner</title>
+    <!-- 
+        NOTE: Removed external CDN for Tailwind CSS. 
+        All styling is now contained within the <style> block for full offline support. 
+    -->
+    <style>
+        /* Custom styles for a dark, ghost-hunting aesthetic */
+        body {
+            /* Using a system font stack since external fonts (like Inter) cannot be loaded offline */
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        /* Styling the main container for a console look */
+        #app-container {
+            width: 100%;
+            max-width: 800px;
+            margin: 20px;
+            padding: 20px;
+            border: 2px solid #4a0000; /* Dark red border */
+            box-shadow: 0 0 30px rgba(255, 0, 0, 0.3); /* Red glow effect */
+            background-color: #0d0d0d;
+            border-radius: 12px;
+        }
+
+        /* Canvas for the video feed/anomaly display */
+        #display-canvas {
+            border: 3px solid #00ff00; /* Green display border */
+            box-shadow: 0 0 15px rgba(0, 255, 0, 0.5);
+            width: 100%;
+            border-radius: 6px;
+            background-color: #000;
+        }
+
+        /* --- OFFLINE UTILITY AND COMPONENT CLASSES (Replaces Tailwind) --- */
+        .text-center { text-align: center; }
+        .mb-4 { margin-bottom: 1rem; }
+        .mt-1 { margin-top: 0.25rem; }
+        .mt-4 { margin-top: 1rem; }
+        .mt-6 { margin-top: 1.5rem; }
+        .mb-2 { margin-bottom: 0.5rem; }
+        .p-3 { padding: 0.75rem; }
+        .p-4 { padding: 1rem; }
+        .w-full { width: 100%; }
+        .mx-auto { margin-left: auto; margin-right: auto; }
+        .flex { display: flex; }
+        .justify-around { justify-content: space-around; }
+        .justify-between { justify-content: space-between; }
+        .items-center { align-items: center; }
+        .flex-col { flex-direction: column; }
+        .space-y-3 > :not([hidden]) ~ :not([hidden]) { margin-top: 0.75rem; }
+        .uppercase { text-transform: uppercase; }
+        .font-bold { font-weight: 700; }
+        .font-semibold { font-weight: 600; }
+        .font-mono { font-family: monospace; }
+        .hidden { display: none !important; }
+
+        /* Typography */
+        .title-text { font-size: 1.5rem; line-height: 2rem; font-weight: 700; color: #00ff00; letter-spacing: 0.05em; }
+        .text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+        .text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+        .text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+        .text-xs-gray-500 { font-size: 0.75rem; line-height: 1rem; color: #6b7280; }
+        .text-gray-900 { color: #111827; }
+        .text-gray-400 { color: #9ca3af; }
+        .text-gray-300 { color: #d1d5db; }
+        .text-gray-500 { color: #6b7280; }
+        .text-red-main { color: #ff4d4d; }
+        .text-green-main { color: #00ff00; }
+        
+        /* Status Bar (Frame Indicators) */
+        .status-bar { 
+            padding: 0.75rem; 
+            background-color: rgba(0, 0, 0, 0.4); 
+            border: 1px solid #374151; /* gray-700 */
+            border-radius: 0.5rem; 
+        }
+        .indicator-dot {
+            width: 1rem;
+            height: 1rem;
+            border-radius: 50%;
+            margin: 0.25rem auto 0;
+            background-color: #4b5563; /* Initial gray-700 */
+            transition: background-color 300ms;
+        }
+        .bg-green-active { background-color: #00e600; }
+        .bg-red-active { background-color: #ff4d4d; }
+
+        /* Control Grid */
+        .control-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.75rem;
+        }
+        .col-span-2 { grid-column: span 2 / span 2; }
+        /* MD breakpoint (768px) */
+        @media (min-width: 768px) {
+            .control-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
+            .col-span-md-1 {
+                grid-column: span 1 / span 1;
+            }
+        }
+
+        /* Buttons */
+        .bg-gray-800 { background-color: #1f2937; color: #fff; }
+        .bg-green-btn { background-color: #00ff00; color: #111827; }
+        .bg-blue-btn { background-color: #0099ff; color: #fff; }
+        .bg-gray-700-border { background-color: #374151; color: #fff; border: 1px solid #6b7280; }
+        .bg-yellow-400 { background-color: #facc15; }
+        .bg-green-600 { background-color: #059669; }
+        .bg-gray-800-dark { background-color: #1f2937; }
+        .hover-bg-yellow-500:hover { background-color: #eab308; }
+        .hover-bg-green-700:hover { background-color: #047857; }
+        .hover-bg-gray-700:hover { background-color: #374151; }
+        
+        .scan-button {
+            transition: all 0.2s;
+            text-transform: uppercase;
+            border-radius: 0.5rem;
+            padding: 0.75rem;
+            font-weight: 600;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+            /* W-full is handled by grid layout, P-3 and font-semibold are above */
+        }
+        .scan-button:hover:not(:disabled) {
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.8);
+            transform: translateY(-1px);
+        }
+        .scan-button:disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        /* Slider container and log box */
+        .slider-box {
+            margin-top: 1.5rem; 
+            padding: 1rem; 
+            background-color: rgba(0, 0, 0, 0.4); 
+            border: 1px solid #1f2937; /* gray-800 */
+            border-radius: 0.5rem;
+        }
+        .log-title {
+            font-size: 1.125rem; 
+            line-height: 1.75rem; 
+            font-family: monospace; 
+            margin-bottom: 0.5rem;
+        }
+        .log-box {
+            padding: 0.75rem; 
+            background-color: rgba(0, 0, 0, 0.5); 
+            border: 1px solid #1f2937; /* gray-800 */
+            border-radius: 0.5rem;
+        }
+        
+        /* Log styling (existing) */
+        #log {
+            min-height: 80px;
+            max-height: 150px;
+            overflow-y: auto;
+            border-top: 1px solid #333;
+            margin-top: 15px;
+            padding-top: 10px;
+        }
+
+        .log-message {
+            padding: 3px 0;
+            font-size: 0.9rem;
+            line-height: 1.2;
+            border-bottom: 1px dashed #222;
+        }
+
+        .log-anomaly {
+            color: #ff4d4d; /* Bright Red for anomaly */
+            font-weight: bold;
+            animation: pulse-red 1.5s infinite;
+        }
+
+        .log-clear {
+            color: #00e600; /* Bright Green for clear status */
+        }
+
+        @keyframes pulse-red {
+            0% { text-shadow: 0 0 5px rgba(255, 0, 0, 0.5); }
+            50% { text-shadow: 0 0 10px rgba(255, 0, 0, 1); }
+            100% { text-shadow: 0 0 5px rgba(255, 0, 0, 0.5); }
+        }
+
+        /* Slider styling for custom track color */
+        #sensitivity-slider {
+            width: 100%;
+            height: 8px;
+            background: #4b5563; /* gray-700 */
+            border-radius: 4px;
+            -webkit-appearance: none;
+            appearance: none;
+            cursor: pointer;
+        }
+        #sensitivity-slider::-webkit-slider-runnable-track {
+            background: linear-gradient(to right, #ff4d4d, #00ff00);
+            height: 8px;
+            border-radius: 4px;
+        }
+        #sensitivity-slider::-moz-range-track {
+            background: linear-gradient(to right, #ff4d4d, #00ff00);
+            height: 8px;
+            border-radius: 4px;
+        }
+
+        /* Modal specific styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background-color: #0d0d0d;
+            border: 2px solid #00ff00;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
+            border-radius: 12px;
+            padding: 20px;
+            width: 90%;
+            max-width: 400px;
+            text-align: center;
+        }
+        .modal-btn {
+            border-radius: 0.5rem; 
+            padding: 0.75rem; 
+            font-weight: 600; 
+            transition: background-color 0.15s ease-in-out;
+        }
+        .modal-btn.yellow {
+            background-color: #facc15; /* yellow-400 */
+            color: #111827; /* gray-900 */
+        }
+        .modal-btn.yellow:hover { background-color: #eab308; } /* hover:bg-yellow-500 */
+        .modal-btn.green {
+            background-color: #059669; /* green-600 */
+            color: #fff;
+        }
+        .modal-btn.green:hover { background-color: #047857; } /* hover:bg-green-700 */
+        .modal-btn.cancel {
+            background-color: #1f2937; /* gray-800 */
+            color: #9ca3af; /* gray-400 */
+        }
+        .modal-btn.cancel:hover { background-color: #374151; } /* hover:bg-gray-700 */
+
+    </style>
+</head>
+<body>
+
+<div id="app-container">
+    <h1 class="title-text text-center mb-4 uppercase tracking-wide">
+        ANOMALY SCANNER
+    </h1>
+
+    <!-- Hidden Video and Capture Canvases -->
+    <video id="webcam" class="hidden" autoplay playsinline></video>
+    <canvas id="canvas-capture-1" class="hidden"></canvas>
+    <canvas id="canvas-capture-2" class="hidden"></canvas>
+    <canvas id="canvas-capture-3" class="hidden"></canvas>
+
+    <!-- Main Display Canvas -->
+    <canvas id="display-canvas" width="640" height="480"></canvas>
+
+    <!-- Frame Status Display -->
+    <div id="frame-status-container" class="mt-4 flex justify-around status-bar">
+        <div id="status-1" class="text-center">
+            <p class="text-sm font-semibold text-gray-500">FRAME 1</p>
+            <div class="indicator-dot"></div>
+        </div>
+        <div id="status-2" class="text-center">
+            <p class="text-sm font-semibold text-gray-500">FRAME 2</p>
+            <div class="indicator-dot"></div>
+        </div>
+        <div id="status-3" class="text-center">
+            <p class="text-sm font-semibold text-gray-500">FRAME 3</p>
+            <div class="indicator-dot"></div>
+        </div>
+    </div>
+
+    <!-- Controls: Updated to use a grid for four buttons -->
+    <div class="control-grid mt-6">
+        <!-- NEW CAMERA BUTTON -->
+        <button id="camera-select-button" class="scan-button w-full bg-gray-800 col-span-2 col-span-md-1">
+            <span id="current-camera-mode">SELECT CAMERA</span>
+        </button>
+
+        <button id="capture-button" class="scan-button w-full bg-green-btn" disabled>
+            MANUAL SCAN
+        </button>
+        <button id="auto-scan-button" class="scan-button w-full bg-blue-btn" disabled>
+            START AUTO SCAN
+        </button>
+        <button id="reset-button" class="scan-button w-full bg-gray-700-border" disabled>
+            CLEAR / RESET
+        </button>
+    </div>
+    
+    <!-- Sensitivity Slider -->
+    <div class="slider-box">
+        <div class="flex justify-between items-center mb-2">
+            <label for="sensitivity-slider" class="text-sm font-mono text-gray-300">
+                ANOMALY THRESHOLD: 
+                <span id="sensitivity-value" class="text-green-main font-bold">30</span>
+            </label>
+        </div>
+        <input type="range" id="sensitivity-slider" min="1" max="100" value="30" class="w-full">
+        <div class="flex justify-between text-xs-gray-500 mt-1">
+            <span class="text-red-main font-semibold">HIGH SENSITIVITY (1)</span>
+            <span class="log-clear font-semibold">LOW SENSITIVITY (100)</span>
+        </div>
+    </div>
+
+
+    <!-- Log/Console Area -->
+    <div id="log-container" class="mt-6">
+        <h2 class="log-title text-green-main mb-2">
+            > CONSOLE LOG:
+        </h2>
+        <div id="log" class="log-box">
+            <!-- Log messages appear here -->
+        </div>
+    </div>
+
+</div>
+
+<!-- Camera Selection Modal -->
+<div id="camera-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+        <h3 class="text-xl font-bold mb-4 text-green-main">SELECT CAMERA</h3>
+        <p class="mb-6 text-gray-300">Choose the camera to use for the anomaly scan.</p>
+        <div class="flex flex-col space-y-3">
+            <button id="front-camera-button" class="modal-btn yellow">
+                Front Facing (Selfie)
+            </button>
+            <button id="rear-camera-button" class="modal-btn green">
+                Rear Facing (Environment)
+            </button>
+            <button id="cancel-camera-button" class="modal-btn cancel">
+                Cancel
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const webcam = document.getElementById('webcam');
+    const displayCanvas = document.getElementById('display-canvas');
+    const captureCanvases = [
+        document.getElementById('canvas-capture-1'),
+        document.getElementById('canvas-capture-2'),
+        document.getElementById('canvas-capture-3')
+    ];
+    const captureButton = document.getElementById('capture-button');
+    const autoScanButton = document.getElementById('auto-scan-button');
+    const resetButton = document.getElementById('reset-button');
+    const cameraSelectButton = document.getElementById('camera-select-button');
+    const currentCameraMode = document.getElementById('current-camera-mode');
+    const logElement = document.getElementById('log');
+
+    // New Sensitivity Slider Elements
+    const sensitivitySlider = document.getElementById('sensitivity-slider');
+    const sensitivityValueDisplay = document.getElementById('sensitivity-value');
+
+    // Modal elements
+    const cameraModal = document.getElementById('camera-modal');
+    const frontCameraButton = document.getElementById('front-camera-button');
+    const rearCameraButton = document.getElementById('rear-camera-button');
+    const cancelCameraButton = document.getElementById('cancel-camera-button');
+
+    // References to the new frame status indicator divs
+    const statusIndicators = [
+        document.querySelector('#status-1 div'),
+        document.querySelector('#status-2 div'),
+        document.querySelector('#status-3 div')
+    ];
+
+    let displayCtx = displayCanvas.getContext('2d');
+    let animationFrameId = null;
+    let streamActive = false;
+    let anomalyFrozen = false;
+    let autoScanActive = false;
+    let autoScanIntervalId = null;
+    let activeStream = null; // To hold the active media stream object
+    let currentFacingMode = null; // 'user' or 'environment'
+
+    const AUTO_SCAN_INTERVAL_MS = 3500;
+    // Initialize anomalyThreshold from the slider's default value
+    let anomalyThreshold = parseInt(sensitivitySlider.value); 
+    
+    // Update the display initially to match the JS variable (should be 30)
+    sensitivityValueDisplay.textContent = anomalyThreshold;
+
+
+    /**
+     * Helper to add a message to the console log.
+     * @param {string} message - The text message.
+     * @param {string} type - 'status', 'anomaly', or 'error'.
+     */
+    function logMessage(message, type = 'status') {
+        const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+        const p = document.createElement('p');
+        p.className = `log-message font-mono ${type === 'anomaly' ? 'log-anomaly' : type === 'clear' ? 'log-clear' : 'text-gray-400'}`;
+        p.textContent = `[${timestamp}] ${message}`;
+
+        logElement.prepend(p); // Add to the top
+        // Keep the log clean (max 10 entries)
+        while (logElement.children.length > 10) {
+            logElement.removeChild(logElement.lastChild);
+        }
+    }
+
+    /**
+     * Resets the visual indicators for the captured frames.
+     */
+    function resetFrameStatus() {
+        statusIndicators.forEach(indicator => {
+            // Use the new custom classes
+            indicator.classList.remove('bg-green-active', 'bg-red-active'); 
+            // The indicator-dot class already sets the base gray color
+        });
+    }
+
+    /**
+     * Updates the visual indicator for a specific frame.
+     * @param {number} frameIndex - 1, 2, or 3.
+     * @param {string} status - 'captured' or 'anomaly'.
+     */
+    function updateFrameStatus(frameIndex, status = 'captured') {
+        const indicator = statusIndicators[frameIndex - 1];
+        if (!indicator) return;
+
+        indicator.classList.remove('bg-green-active', 'bg-red-active');
+        indicator.classList.add(
+            status === 'captured' ? 'bg-green-active' :
+            status === 'anomaly' ? 'bg-red-active' :
+            'bg-gray-700' // Should be handled by .indicator-dot, but added for clarity
+        );
+    }
+
+    /**
+     * Stops the currently active camera stream, if one exists.
+     */
+    function stopCameraStream() {
+        if (activeStream) {
+            activeStream.getTracks().forEach(track => track.stop());
+            activeStream = null;
+            streamActive = false;
+            webcam.srcObject = null;
+            
+            // Clear canvas and log status
+            displayCtx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
+            logMessage('Previous camera stream stopped.', 'status');
+
+            // Disable all scan controls
+            captureButton.disabled = true;
+            autoScanButton.disabled = true;
+            resetButton.disabled = true;
+
+            // Reset the button text and color classes
+            currentCameraMode.textContent = 'SELECT CAMERA';
+            cameraSelectButton.classList.remove('bg-green-600', 'bg-yellow-400', 'text-gray-900');
+            cameraSelectButton.classList.add('bg-gray-800', 'text-white');
+            
+            // Cancel any ongoing auto scan
+            if (autoScanActive) {
+                toggleAutoScan();
+            }
+        }
+    }
+
+    /**
+     * Initializes the webcam stream with the given facing mode constraints.
+     * @param {string} mode - 'user' (front) or 'environment' (rear).
+     */
+    async function setupCamera(mode) {
+        if (mode === currentFacingMode) {
+            logMessage(`Camera is already set to ${mode === 'user' ? 'Front' : 'Rear'}.`, 'status');
+            return;
+        }
+
+        stopCameraStream(); // Stop any existing stream first
+        currentFacingMode = mode;
+        const modeText = mode === 'user' ? 'Front' : 'Rear';
+        logMessage(`Initializing ${modeText} camera feed...`);
+
+        try {
+            const constraints = {
+                video: {
+                    facingMode: { exact: mode }
+                }
+            };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            activeStream = stream;
+            webcam.srcObject = stream;
+            
+            webcam.onloadedmetadata = () => {
+                const W = webcam.videoWidth;
+                const H = webcam.videoHeight;
+
+                // Adjust canvas size to match video feed
+                displayCanvas.width = W;
+                displayCanvas.height = H;
+                captureCanvases.forEach(canvas => {
+                    canvas.width = W;
+                    canvas.height = H;
+                });
+
+                streamActive = true;
+                logMessage(`${modeText} Camera feed initialized. Resolution: ${W}x${H}.`, 'clear');
+                drawLiveFeed();
+                
+                // Enable controls
+                captureButton.disabled = false;
+                autoScanButton.disabled = false;
+                resetButton.disabled = false;
+
+                // Update camera select button text and color classes
+                currentCameraMode.textContent = `${modeText.toUpperCase()} CAMERA ACTIVE`;
+                cameraSelectButton.classList.remove('bg-gray-800', 'text-white');
+                if (mode === 'user') {
+                    cameraSelectButton.classList.add('bg-yellow-400', 'text-gray-900');
+                    cameraSelectButton.classList.remove('bg-green-600');
+                } else {
+                    cameraSelectButton.classList.add('bg-green-600', 'text-white');
+                    cameraSelectButton.classList.remove('bg-yellow-400', 'text-gray-900');
+                }
+            };
+        } catch (error) {
+            // Handle specific errors for missing camera
+            let errorMsg = `Could not access ${modeText} camera.`;
+            if (error.name === 'NotReadableError') {
+                 errorMsg += ' Camera is in use by another application.';
+            } else if (error.name === 'NotFoundError') {
+                 errorMsg += ' Device does not have this camera type.';
+            } else if (error.name === 'NotAllowedError') {
+                 errorMsg += ' Permission denied by user.';
+            }
+            logMessage(`[!!! ERROR !!!] ${errorMsg} (${error.name})`, 'error');
+            currentFacingMode = null; // Reset mode
+        }
+    }
+
+    /**
+     * Shows the modal for camera selection.
+     */
+    function showCameraModal() {
+        cameraModal.classList.remove('hidden');
+    }
+
+    /**
+     * Hides the modal for camera selection.
+     */
+    function hideCameraModal() {
+        cameraModal.classList.add('hidden');
+    }
+
+    /**
+     * The main animation loop to draw the live video feed onto the display canvas.
+     */
+    function drawLiveFeed() {
+        if (!anomalyFrozen && streamActive) {
+            // Check if the video is actually playing before drawing
+            if (!webcam.paused && !webcam.ended) {
+                displayCtx.drawImage(webcam, 0, 0, displayCanvas.width, displayCanvas.height);
+            }
+        }
+        animationFrameId = requestAnimationFrame(drawLiveFeed);
+    }
+
+    /**
+     * Captures a single frame from the video stream onto a target canvas.
+     * @param {HTMLCanvasElement} canvas - The canvas to draw the frame on.
+     */
+    function captureFrame(canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(webcam, 0, 0, canvas.width, canvas.height);
+    }
+
+    /**
+     * Handles the sequence of capturing three frames and starting the analysis.
+     */
+    async function startCapture() {
+        if (!streamActive || anomalyFrozen) return;
+
+        // Only disable manual button if not in auto-scan mode
+        if (!autoScanActive) {
+             captureButton.disabled = true;
+        }
+
+        resetFrameStatus(); // Reset visual indicators
+        logMessage('Scanning initiated. Capturing 3 frames with 1.0s interval...');
+
+        // Sequence: Capture Frame 1
+        captureFrame(captureCanvases[0]);
+        updateFrameStatus(1, 'captured');
+        logMessage('Frame 1 captured.');
+
+        // Delay 1
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Sequence: Capture Frame 2
+        captureFrame(captureCanvases[1]);
+        updateFrameStatus(2, 'captured');
+        logMessage('Frame 2 captured.');
+
+        // Delay 2
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Sequence: Capture Frame 3
+        captureFrame(captureCanvases[2]);
+        updateFrameStatus(3, 'captured');
+        logMessage('Frame 3 captured. Analyzing...');
+        
+        // Added 50ms pause to ensure FRAME 3 indicator is visible
+        await new Promise(resolve => setTimeout(resolve, 50)); 
+
+        analyzeImages(captureCanvases);
+
+        if (!autoScanActive) {
+             captureButton.disabled = false;
+        }
+    }
+
+    /**
+     * The continuous loop logic for Auto Scan.
+     */
+    function startAutoScanLoop() {
+        // Run the first scan immediately
+        startCapture();
+
+        autoScanIntervalId = setInterval(() => {
+            if (anomalyFrozen) {
+                // Anomaly found, stop the auto scan loop
+                clearInterval(autoScanIntervalId);
+                autoScanActive = false;
+                autoScanButton.textContent = 'ANOMALY CAPTURED (STOPPED)';
+                autoScanButton.classList.remove('bg-blue-btn');
+                // Use custom classes for the stopped state colors
+                autoScanButton.classList.add('bg-gray-700-border', 'text-white'); 
+                captureButton.disabled = false;
+            } else {
+                // No anomaly, continue scanning
+                startCapture();
+            }
+        }, AUTO_SCAN_INTERVAL_MS);
+    }
+
+    /**
+     * Toggles the Auto Scan feature on and off.
+     */
+    function toggleAutoScan() {
+        if (!streamActive || anomalyFrozen) return;
+
+        if (autoScanActive) {
+            // Stop Auto Scan
+            clearInterval(autoScanIntervalId);
+            autoScanActive = false;
+            autoScanButton.textContent = 'START AUTO SCAN';
+            autoScanButton.classList.remove('bg-red-main'); 
+            autoScanButton.classList.add('bg-blue-btn'); 
+            captureButton.disabled = false;
+            logMessage('Auto Scan stopped by user.', 'status');
+        } else {
+            // Start Auto Scan
+            autoScanActive = true;
+            autoScanButton.textContent = 'STOP AUTO SCAN';
+            autoScanButton.classList.remove('bg-blue-btn'); 
+            autoScanButton.classList.add('bg-red-main'); 
+            captureButton.disabled = true; // Disable manual scan when auto is running
+            logMessage(`Auto Scan initiated. Scanning every ${(AUTO_SCAN_INTERVAL_MS / 1000).toFixed(1)}s...`, 'status');
+
+            startAutoScanLoop();
+        }
+    }
+
+    /**
+     * Compares the captured images and highlights anomalies.
+     */
+    function analyzeImages(canvases) {
+        const [canvas1, , canvas3] = canvases;
+        const W = displayCanvas.width;
+        const H = displayCanvas.height;
+
+        const ctx1 = canvas1.getContext('2d');
+        const ctx3 = canvas3.getContext('2d');
+
+        // Get the pixel data from Frame 1 (base) and Frame 3 (comparison)
+        const imgData1 = ctx1.getImageData(0, 0, W, H);
+        const imgData3 = ctx3.getImageData(0, 0, W, H);
+        const data1 = imgData1.data;
+        const data3 = imgData3.data;
+
+        // 1. Prepare Anomaly Canvas for overlay
+        const anomalyData = displayCtx.createImageData(W, H);
+        const anomalyPixels = anomalyData.data;
+
+        let pixelsChanged = 0;
+
+        for (let i = 0; i < data1.length; i += 4) {
+            const r1 = data1[i], g1 = data1[i + 1], b1 = data1[i + 2];
+            const r3 = data3[i], g3 = data3[i + 1], b3 = data3[i + 2];
+
+            // Calculate overall color difference (Manhattan distance, simplified)
+            const diff = (Math.abs(r1 - r3) + Math.abs(g1 - g3) + Math.abs(b1 - b3)) / 3;
+
+            // Use the dynamically set anomalyThreshold
+            if (diff > anomalyThreshold) {
+                // ANOMALY DETECTED at this pixel
+                // Highlight color: Bright Purple/Magenta overlay
+                anomalyPixels[i] = 255;      // R (Red)
+                anomalyPixels[i + 1] = 0;    // G
+                anomalyPixels[i + 2] = 255;  // B (Purple/Magenta)
+                anomalyPixels[i + 3] = 180;  // A (Semi-transparent overlay)
+                pixelsChanged++;
+            } else {
+                // Keep background transparent
+                anomalyPixels[i + 3] = 0;
+            }
+        }
+
+        const totalPixels = W * H;
+        const changePercentage = (pixelsChanged / totalPixels) * 100;
+
+        // Threshold for confirming a genuine anomaly (e.g., 0.2% of the screen changed)
+        const detectionThresholdPercent = 0.2;
+
+        // 2. Display Result
+        // Draw Frame 1 as the frozen base image
+        displayCtx.putImageData(imgData1, 0, 0);
+
+        if (changePercentage > detectionThresholdPercent) {
+            anomalyFrozen = true;
+            // Highlight all indicators red if anomaly is detected
+            updateFrameStatus(1, 'anomaly');
+            updateFrameStatus(2, 'anomaly');
+            updateFrameStatus(3, 'anomaly');
+            // Overlay the anomaly mask (difference pixels)
+            displayCtx.putImageData(anomalyData, 0, 0);
+            logMessage(`[!!! ANOMALY CAPTURED !!!] Difference area: ${changePercentage.toFixed(2)}% of screen.`, 'anomaly');
+        } else {
+            // No anomaly, keep showing live feed by letting drawLiveFeed continue.
+            logMessage(`[Status] No significant anomaly detected (${changePercentage.toFixed(2)}% change). Area clear.`, 'clear');
+            anomalyFrozen = false; // Ensure it keeps drawing the live feed
+            resetFrameStatus(); // Reset status indicators
+        }
+    }
+
+    /**
+     * Clears the anomaly display and resets the app to live feed mode.
+     */
+    function clearAndReset() {
+        // Stop auto scan if running
+        if (autoScanActive) {
+            toggleAutoScan(); // Use toggle to ensure button state is reset
+        }
+        
+        if (anomalyFrozen) {
+            anomalyFrozen = false;
+            // Clear the canvas by redrawing the live feed immediately
+            displayCtx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
+            drawLiveFeed();
+            logMessage('Anomaly display cleared. Resuming live scan.', 'status');
+        } else {
+             logMessage('System ready. Live feed active.', 'clear');
+        }
+        resetFrameStatus(); // Reset visual indicators
+        // Controls should only be enabled if a camera is active
+        if (streamActive) {
+            captureButton.disabled = false;
+            autoScanButton.disabled = false;
+        }
+    }
+
+
+    // --- Event Listeners and Initialization ---
+    captureButton.addEventListener('click', startCapture);
+    autoScanButton.addEventListener('click', toggleAutoScan);
+    resetButton.addEventListener('click', clearAndReset);
+    cameraSelectButton.addEventListener('click', showCameraModal);
+
+    frontCameraButton.addEventListener('click', () => {
+        hideCameraModal();
+        setupCamera('user');
+    });
+
+    rearCameraButton.addEventListener('click', () => {
+        hideCameraModal();
+        setupCamera('environment');
+    });
+    
+    cancelCameraButton.addEventListener('click', hideCameraModal);
+    
+    // Sensitivity Slider Listener
+    sensitivitySlider.addEventListener('input', (event) => {
+        anomalyThreshold = parseInt(event.target.value);
+        sensitivityValueDisplay.textContent = anomalyThreshold;
+        logMessage(`Threshold set to ${anomalyThreshold}.`, 'status');
+    });
+
+    // Initial log message on load
+    window.onload = () => {
+        logMessage('System initialization complete. Awaiting camera selection.', 'status');
+        showCameraModal(); // Prompt user to select camera immediately
+        drawLiveFeed(); // Start the drawing loop to keep the screen active
+    };
+
+</script>
+</body>
+</html>
